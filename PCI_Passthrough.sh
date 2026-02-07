@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 echo PCI_Passthrough
 echo v0.1.0
 echo https://pve.proxmox.com/wiki/PCI_Passthrough
