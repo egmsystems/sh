@@ -231,6 +231,8 @@ main() {
     #pct reboot "$CONTAINER_ID"
     create_service
     show_summary
+    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/unattended.xml /root/user/scripts/example/unattended.xml
+    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/windows_injection.7z /root/user/scripts/example/windows_injection.7z
     pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
     echo pct exec "$CONTAINER_ID" -- /root/iventoy.sh -R start
     pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
