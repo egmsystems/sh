@@ -135,24 +135,26 @@ install_iventoy() {
 create_service() {
     print_info "create_service..."
     
-    pct exec "$CONTAINER_ID" -- bash -c 'cat > /etc/systemd/system/iventoy.service << EOF
+    pct exec "$CONTAINER_ID" -- bash -c 'cat <<EOF >/etc/systemd/system/iventoy.service
 [Unit]
 Description=iVentoy PXE Boot Server
 Documentation=https://iventoy.com
 After=network.target
 
 [Service]
-#Type=forking
-Type=simple
 #User=root
+#Type=simple
+Type=forking
 WorkingDirectory=/root
-Environment=IVENTOY_API_ALL=1
+ExecStart=/root/iventoy.sh -R start
+ExecStop=/root/iventoy.sh stop
+PIDFile=/var/run/iventoy.pid
 Environment=IVENTOY_AUTO_RUN=1
+Environment=IVENTOY_API_ALL=1
 Environment=LIBRARY_PATH=/root/lib/lin64
 Environment=LD_LIBRARY_PATH=/root/lib/lin64
-ExecStart=sh ./iventoy.sh -R start
-ExecStop=/root/iventoy.sh stop
 Restart=on-failure
+#Restart=always
 RestartSec=10
 
 [Install]
