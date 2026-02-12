@@ -8,6 +8,8 @@ echo
 echo https://github.com/egmsystems/sh
 echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/PVE-mods.sh)"
 echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/PCI_Passthrough.sh)"
+echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/pve_createContainer-iVentoy.sh)"
+echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/pve_createContainer-qDevice.sh)"
 echo
 echo Apt-Cacher-NG
 echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/apt-cacher-ng.sh)"
