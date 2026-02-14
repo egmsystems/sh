@@ -70,6 +70,7 @@ create_container() {
     else
         NETCFG="name=eth0,bridge=vmbr0$MAC,ip=${IP_Config}/24,gw=${GATEWAY}"
     fi
+    echo $NETCFG;
     # Optional extra flags (uncomment or set EXTRA_FLAGS variable):
     EXTRA_FLAGS="--swap 512" #--start 1 --onboot 1
     EXTRA_FLAGS="$EXTRA_FLAGS --unprivileged 1"
@@ -86,10 +87,6 @@ create_container() {
         --timezone 'host' \
         --hostname "$HOSTNAME" \
         ${EXTRA_FLAGS:-}
-
-    #echo "lxc.mount.entry = /sys/class/dmi/id sys/class/dmi/id none ro,bind,create=dir >> /etc/pve/lxc/$CONTAINER_ID.conf"
-    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id sys/devices/virtual/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
-    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id /root/data/sys/class/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
 
     print_info "Container $CONTAINER_ID created successfully."
 }
@@ -145,10 +142,6 @@ WorkingDirectory=/root
 ExecStart=/root/coroSync.sh -R start
 ExecStop=/root/coroSync.sh stop
 PIDFile=/var/run/coroSync.pid
-Environment=IVENTOY_AUTO_RUN=1
-Environment=IVENTOY_API_ALL=1
-Environment=LIBRARY_PATH=/root/lib/lin64
-Environment=LD_LIBRARY_PATH=/root/lib/lin64
 Restart=on-failure
 #Restart=always
 RestartSec=10
@@ -158,7 +151,7 @@ WantedBy=multi-user.target
 EOF
 '
     pct exec "$CONTAINER_ID" -- systemctl enable -q --now coroSync.service
-    print_info "iVentoy service created and enabled."
+    print_info "service created and enabled."
 }
 
 # Enable root auto-login on the container console (tty1)
@@ -208,9 +201,8 @@ Updating() {
 }
 
 main() {
-    print_info "PVE iVentoy LXC Container Creation Script"
+    print_info "PVE LXC Container Creation Script"
     echo v0.0.1
-    echo Creates a lightweight iVentoy container for ISO/image management on Proxmox VE
     echo ""
 
     validate_input
