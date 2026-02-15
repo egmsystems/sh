@@ -13,7 +13,8 @@ IP_Config="dhcp"
 MAC=""                      # Optional MAC address (leave empty for random) - format: 02:xx:xx:xx:xx:xx (02 for locally administered)
 GATEWAY=""                     # Gateway IP (leave empty for DHCP)
 DISK_SIZE="2"                  # Disk size in GB
-MEMORY="512"                   # Memory in MB
+MEMORY="32"                    # MB
+SWAP="16"                    # MB
 CORES=1                        # CPU cores
 STORAGE="sdd1"                 # Storage backend
 OS_TYPE="debian"               # OS type
@@ -79,6 +80,7 @@ create_container() {
         "$OS_VERSION" \
         --cores "$CORES" \
         --memory "$MEMORY" \
+        --swap "$SWAP" \
         --storage "$STORAGE" \
         --rootfs "${STORAGE}:${DISK_SIZE}" \
         --net0 "${NETCFG}" \
@@ -181,6 +183,7 @@ show_summary() {
     echo "Hostname:        $HOSTNAME"
     echo "IP Address:      $IP_Config"
     echo "Memory:          ${MEMORY}MB"
+    echo "Swap:            ${SWAP}MB"
     echo "Disk:            ${DISK_SIZE}GB"
     echo "========================================"
     echo ""
