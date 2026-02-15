@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#set -e
+set -e
 echo $(echo $(basename "$0" .sh) | sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g')
 echo version 0.0.1
 echo
@@ -11,6 +11,7 @@ echo https://FL002291@pbs005.tuxis.nl:8007
 echo
 echo https://github.com/egmsystems/sh
 #bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/PVE-mods.sh)"
+#bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/bootFromUSB.sh)"
 #bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/PCI_Passthrough.sh)"
 #bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/pve_createContainer-iVentoy.sh)"
 #bash -c "$(curl -fsSL https://raw.githubusercontent.com/egmsystems/sh/main/pve_createContainer-qDevice.sh)"

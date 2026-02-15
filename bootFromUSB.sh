@@ -43,13 +43,13 @@ storageSpeedTest() {
 }
 
 mountDiectoryToTmp() {
-    echo $(varToTitleCase ${FUNCNAME[0]})
-    tmp="$1/tmp"
-    echo cp -r /tmp/* $tmp
-    echo rm -r /tmp
-    echo mount --bind $tmp /tmp
+    local tmp_old="/$3"
+    local tmp_new="$1/$3"
+    echo "cp -rf $tmp_old/* $tmp_new"
+    echo rm -rf $tmp_old/*
+    echo mount --bind $tmp_new $tmp_old
     echo cat /etc/fstab
-    echo "$tmp /tmp tmpfs defaults,noatime,nosuid,nodev,mode=$2 0 0" >> /etc/fstab
+    echo "echo '$tmp_new $tmp_old tmpfs defaults,noatime,nosuid,nodev,mode=$2 0 0' >> /etc/fstab"
     echo nano /etc/fstab
     echo mount -a
     echo systemctl daemon-reload
@@ -60,10 +60,11 @@ main() {
     echo version 0.0.1
     echo
     mode=1777
-    ssd_directory="/ssd1"
     hdd_directory="/hdd1"
-    mkdir -pv -m $mode $ssd_directory/{tmp,swap,logs,cache}
-    mkdir -pv -m $mode $hdd_directory/tmp
+    ssd_directory="/ssd1"
+    mkdir -pv -m $mode $hdd_directory/tmp #{swap,logs,cache}
+    mkdir -pv -m $mode $ssd_directory/{tmp,var/tmp,var/cache}
+    chmod 1777 /var/tmp
 
     installScript
     pvesm_add_dir_local
@@ -71,7 +72,10 @@ main() {
     storageSpeedTest ""
     storageSpeedTest "$hdd_directory/tmp"
     storageSpeedTest "$ssd_directory/tmp"
-    mountDiectoryToTmp $ssd_directory $mode
+    echo $(varToTitleCase "mountDiectoryToTmp")
+    mountDiectoryToTmp $ssd_directory $mode "tmp"
+    mountDiectoryToTmp $ssd_directory $mode "var/tmp"
+    mountDiectoryToTmp $ssd_directory $mode "var/cache"
 }
 
 bashStart
