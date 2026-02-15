@@ -43,5 +43,3 @@ echo
 echo OneDev
 echo bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/onedev.sh)"
 echo
-echo Microsoft Activation Scripts (MAS)
-echo https://massgrave.dev
