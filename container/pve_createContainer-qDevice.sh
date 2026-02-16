@@ -245,5 +245,7 @@ main() {
     apt -y install corosync-qdevice
     print_info "executing: pvecm qdevice setup $IP_ADDRESS -f"
     pvecm qdevice setup "$IP_ADDRESS"
+    print_info "apt -y remove corosync-qdevice"
+    print_info "pvecm qdevice remove"
 }
 main
