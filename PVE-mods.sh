@@ -6,5 +6,8 @@ sensors-detect
 
 #wget https://raw.githubusercontent.com/Meliox/PVE-mods/refs/heads/main/pve-mod-gui-sensors.sh
 #bash pve-mod-gui-sensors.sh install
-bash (curl -s https://raw.githubusercontent.com/Meliox/PVE-mods/refs/heads/main/pve-mod-gui-sensors.sh | bash) install
+TEMP_SCRIPT=$(mktemp)
+curl -fsSL https://raw.githubusercontent.com/egmsystems/PVE-mods/refs/heads/main/pve-mod-gui-sensors.sh -o "$TEMP_SCRIPT"
+bash "$TEMP_SCRIPT" install
+rm -f "$TEMP_SCRIPT"
 # Then clear the browser cache to ensure all changes are visualized.

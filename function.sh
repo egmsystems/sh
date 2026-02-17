@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #set -x
+environment=0
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,15 +30,25 @@ camelCaseToTitleCase() {
 }
 
 varToTitleCase() {
-    echo $(camelCaseToTitleCase $(varToCamelCase $1))
+    if [ $environment -eq 0 ]; then
+        echo $1
+    else
+        echo $(camelCaseToTitleCase $(varToCamelCase $1))
+    fi
 }
 
 bashStart() {
-    set -e
     chmod +x $0
     print_info $(varToTitleCase $(basename "$0" .sh))
     echo "v$1"
     echo ""
+}
+
+input() {
+    local var_name="${2:-REPLY}"
+    local options="$3"
+    read $options -p "$1: " $var_name
+    eval "echo \$$var_name"
 }
 
 validate_input() {
@@ -96,18 +107,27 @@ EOF
 }
 
 wait_container() {
-    print_info "wait_container..."
+    local CONTAINER_ID=$1
+    print_info "wait_container $CONTAINER_ID..."
     while true; do
         if pct status "$CONTAINER_ID" | grep -q "running"; then
             break
         fi
         sleep 1
     done
-    print_info "...wait_container"
+    print_info "...$CONTAINER_ID wait_container"
+}
+
+pct_start(){
+    local CONTAINER_ID=$1
+    print_info "pct_start $CONTAINER_ID..."
+    pct start "$CONTAINER_ID"
+    print_info "...$CONTAINER_ID pct_start"
 }
 
 wait_IP_Config() {
-    print_info "wait_IP_Config..."
+    local CONTAINER_ID=$1
+    print_info "wait_IP_Config $CONTAINER_ID..."
     if [ "${IP_Config,,}" = "dhcp" ]; then
         while true; do
             IP_ADDRESS=$(lxc-info -n "$CONTAINER_ID" -i | awk '{print $2}')
@@ -122,26 +142,29 @@ wait_IP_Config() {
     else
         IP_ADDRESS="$IP_Config"
     fi
-    print_info "...wait_IP_Config"
+    print_info "...$CONTAINER_ID wait_IP_Config"
 }
 
-wait_IP_internet() {
-    print_info "...wait_IP_internet"
-    while ! pct exec "$CONTAINER_ID" -- ping -c 2 "8.8.8.8"; do
-        print_warn "ping 8.8.8.8 bad, witing 1s to try ..."
+wait_ping() {
+    set -e
+    local IP_ADDRESS=$1
+    local CONTAINER_ID=$2
+    print_info "wait_ping $CONTAINER_ID..."
+    command="ping -c 1 $IP_ADDRESS"
+    if [ "$CONTAINER_ID" != "" ] ; then
+        command="pct exec $CONTAINER_ID -- $command"
+    fi
+    echo $command
+    while ! $command; do
+        print_warn "ping $IP_ADDRESS bad, witing 1s to try ..."
         sleep 1
     done
-    print_info "...wait_IP_internet"
-}
-
-send_start(){
-    print_info "send_start $CONTAINER_ID..."
-    pct start "$CONTAINER_ID"
-    print_info "sended."
+    print_info "...$CONTAINER_ID wait_ping"
 }
 
 enable_console_autologin() {
-    print_info "enable_console_autologin (root) on tty1 CONTAINER_ID: $CONTAINER_ID ..."
+    local CONTAINER_ID=$1
+    print_info "enable_console_autologin (root) on tty1 $CONTAINER_ID ..."
     pct exec "$CONTAINER_ID" -- bash -c "set -e
 mkdir -p /etc/systemd/system/container-getty@1.service.d
 echo '[Service]
@@ -167,9 +190,9 @@ configure_apt_cacher() {
         print_info "configure_apt_cacher not set, skipping apt-cacher-ng configuration"
         return
     fi
-    if [ $ostype == "alpine" ] ; then
+    if [ $ostype = "alpine" ] ; then
         print_info "configure_apt_cacher not work yet with $ostype"
-        return
+        #return
     fi
 
     # sanitize value: strip any http:// or https:// prefix if present
@@ -179,15 +202,17 @@ configure_apt_cacher() {
 
     print_info "configure_apt_cacher at $proxy"
     pct exec "$CONTAINER_ID" -- bash -c "mkdir -p /etc/apt/apt.conf.d && echo 'Acquire::http::Proxy \"http://$proxy\";' > /etc/apt/apt.conf.d/01proxy"
-    # Optionally configure https to go through apt-cacher-ng via apt-transport-https wrappers if needed
+    echo Optionally configure https to go through apt-cacher-ng via apt-transport-https wrappers if needed
 }
 
-upDateGrading() {
-    print_info "upDateGrading..."
+upDateGradeRemoving() {
+    print_info "upDateGradeRemoving..."
     pct exec "$CONTAINER_ID" -- apt -y update
     print_info "...updated, upgrading..."
     pct exec "$CONTAINER_ID" -- apt -y upgrade
-    print_info "...upDateGrading"
+    print_info "...updated, autoRemoving..."
+    pct exec "$CONTAINER_ID" -- apt -y autoremove
+    print_info "...autoRemoving"
 }
 
 reBoot() {
