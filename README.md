@@ -20,6 +20,7 @@ A utility script containing shortcuts and commands for deploying various service
   - Apt-Cacher-NG
   - PVE Processor Microcode updates
   - MQTT, Wazuh, OpenWrt, OneDev
+  - Microsoft Activation Scripts (MAS)
 
 ### `PVE-mods.sh`
 Script to install and configure hardware monitoring tools.

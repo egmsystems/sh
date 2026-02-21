@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -e
 CONTAINER_ID=$(pvesh get /cluster/nextid)
-CONTAINER_NAME=${2:-iventoy}
+## Default container name: use the script filename (without .sh). Allow override via $2
+# Use BASH_SOURCE for robustness when the script is sourced or executed
+SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
+# sanitize: lowercase and replace invalid chars with '-'; allow a-z0-9 and hyphen
+SANITIZED_NAME=$(echo "$SCRIPT_NAME" | sed 's/[^a-z0-9-]/-/g')
+CONTAINER_NAME=${2:-$SANITIZED_NAME}
+echo "Container Name: $CONTAINER_NAME"
+exit
 HOSTNAME="${CONTAINER_NAME}"
+VLAN_ID=0
 IP_ADDRESS="dhcp"
 MAC="bc:24:11:76:fc:38"
 GATEWAY=""                     # Gateway IP (leave empty for DHCP)
@@ -61,7 +69,7 @@ create_container() {
     EXTRA_FLAGS="$EXTRA_FLAGS --unprivileged 0"
 
     pct create "$CONTAINER_ID" \
-        "sdd1:vztmpl/$OS_TYPE-${OS_VERSION}-standard_${OS_VERSION}.1-2_amd64.tar.zst" \
+        "sdd1:vztmpl/debian-${OS_VERSION}-standard_${OS_VERSION}.1-2_amd64.tar.zst" \
         --cores "$CORES" \
         --memory "$MEMORY" \
         --storage "$STORAGE" \
@@ -99,10 +107,6 @@ configure_apt_cacher() {
         print_info "configure_apt_cacher not set, skipping apt-cacher-ng configuration"
         return
     fi
-    if [ $OS_TYPE == "alpine" ] ; then
-        print_info "configure_apt_cacher not work yet with $OS_TYPE"
-        return
-    fi
 
     # sanitize value: strip any http:// or https:// prefix if present
     local proxy="$APT_CACHER"
@@ -114,8 +118,8 @@ configure_apt_cacher() {
     # Optionally configure https to go through apt-cacher-ng via apt-transport-https wrappers if needed
 }
 
-install_app() {
-    print_info "install_app ..."
+install_iventoy() {
+    print_info "install_iventoy ..."
     
     pct exec "$CONTAINER_ID" -- bash -c '
         set -e
@@ -226,7 +230,7 @@ main() {
     starting
     enable_console_autologin
     Installing_dependencies
-    install_app
+    install_iventoy
     echo pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
     pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
     #pct set "$CONTAINER_ID" -mp1 /sys/devices/virtual/dmi/id,mp=/root/data/sys/class/dmi/id,ro=1

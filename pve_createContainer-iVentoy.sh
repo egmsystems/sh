@@ -3,12 +3,14 @@ set -e
 CONTAINER_ID=$(pvesh get /cluster/nextid)
 CONTAINER_NAME=${2:-iventoy}
 HOSTNAME="${CONTAINER_NAME}"
+VLAN_ID=0
 IP_ADDRESS="dhcp"
+MAC="bc:24:11:76:fc:38"
 GATEWAY=""                     # Gateway IP (leave empty for DHCP)
-DISK_SIZE="2"                 # Disk size in GB
+DISK_SIZE="2"                  # Disk size in GB
 MEMORY="512"                   # Memory in MB
 CORES=1                        # CPU cores
-STORAGE="ssd1"                 # Storage backend
+STORAGE="sdd1"                 # Storage backend
 OS_TYPE="debian"               # OS type
 OS_VERSION="13"                # Debian version
 APT_CACHER="192.168.50.78:3142" # apt-cacher-ng host[:port] (empty to disable). Example: 10.0.0.2:3142
@@ -45,15 +47,19 @@ validate_input() {
 }
 
 create_container() {
-    print_info "Creating LXC container..."
+    print_info "create_container $CONTAINER_ID..."
     
+    if [ -n "$MAC" ]; then
+        MAC=",hwaddr=$MAC"
+    fi
     if [ "${IP_ADDRESS,,}" = "dhcp" ]; then
-        NETCFG="name=eth0,bridge=vmbr0,ip=dhcp"
+        NETCFG="name=eth0,bridge=vmbr0$MAC,ip=dhcp"
     else
-        NETCFG="name=eth0,bridge=vmbr0,ip=${IP_ADDRESS}/24,gw=${GATEWAY}"
+        NETCFG="name=eth0,bridge=vmbr0$MAC,ip=${IP_ADDRESS}/24,gw=${GATEWAY}"
     fi
     # Optional extra flags (uncomment or set EXTRA_FLAGS variable):
-    EXTRA_FLAGS="--swap 512 --unprivileged 1" #--start 1 --onboot 1
+    EXTRA_FLAGS="--swap 512" #--start 1 --onboot 1
+    EXTRA_FLAGS="$EXTRA_FLAGS --unprivileged 0"
 
     pct create "$CONTAINER_ID" \
         "sdd1:vztmpl/debian-${OS_VERSION}-standard_${OS_VERSION}.1-2_amd64.tar.zst" \
@@ -67,6 +73,10 @@ create_container() {
         --timezone 'host' \
         --hostname "$HOSTNAME" \
         ${EXTRA_FLAGS:-}
+
+    #echo "lxc.mount.entry = /sys/class/dmi/id sys/class/dmi/id none ro,bind,create=dir >> /etc/pve/lxc/$CONTAINER_ID.conf"
+    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id sys/devices/virtual/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
+    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id /root/data/sys/class/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
 
     print_info "Container $CONTAINER_ID created successfully."
 }
@@ -106,56 +116,52 @@ install_iventoy() {
     
     pct exec "$CONTAINER_ID" -- bash -c '
         set -e
-        IV_VERSION="1.0.21" # Change to desired version
-        mkdir -p /opt /tmp
-        wget -qO /tmp/iventoy.tar.gz https://github.com/ventoy/PXE/releases/download/v${IV_VERSION}/iventoy-${IV_VERSION}-linux-free.tar.gz
-        tar -xzf /tmp/iventoy.tar.gz -C /opt
-        EXDIR=$( (tar -tzf /tmp/iventoy.tar.gz 2>/dev/null || true) | sed "s|^\./||" | grep -v "^$" | head -n1 | cut -f1 -d"/")
-        if [ -n "$EXDIR" ] && [ -d "/opt/$EXDIR" ]; then
-            mv "/opt/$EXDIR" /opt/iVentoy || true
-        else
-            D=$(ls -1 /opt | grep -i iventoy | head -n1 || true)
-            if [ -n "$D" ]; then
-                mv "/opt/$D" /opt/iVentoy || true
-            fi
-        fi
-        cd /opt/iVentoy
+        RELEASE=$(curl -s https://api.github.com/repos/ventoy/pxe/releases/latest | grep "tag_name" | awk "{print substr(\$2, 3, length(\$2)-4) }")
+        echo "version: $RELEASE"
+        mkdir -p /root/{data,iso}
+        cd /tmp
+        wget -q https://github.com/ventoy/PXE/releases/download/v${RELEASE}/iventoy-${RELEASE}-linux-free.tar.gz
+        tar -C /tmp -xzf iventoy*.tar.gz
+        rm -rf /tmp/iventoy*.tar.gz
+        mv /tmp/iventoy*/* /root/
+        cd /root
         #python3 -m pip install -r requirements.txt
         chmod +x ./iventoy.sh
     '
     
-    print_info "iVentoy installed in /opt/iVentoy"
+    print_info "iVentoy installed in /root"
 }
 
 create_service() {
     print_info "create_service..."
     
-    pct exec "$CONTAINER_ID" -- bash -c 'cat > /etc/systemd/system/iventoy.service << EOF
+    pct exec "$CONTAINER_ID" -- bash -c 'cat <<EOF >/etc/systemd/system/iventoy.service
 [Unit]
 Description=iVentoy PXE Boot Server
 Documentation=https://iventoy.com
 After=network.target
 
 [Service]
-#Type=forking
-Type=simple
 #User=root
-WorkingDirectory=/opt/iVentoy
-ExecStart=/opt/iVentoy/iventoy.sh start
-ExecStop=/opt/iVentoy/iventoy.sh stop
+#Type=simple
+Type=forking
+WorkingDirectory=/root
+ExecStart=/root/iventoy.sh -R start
+ExecStop=/root/iventoy.sh stop
+PIDFile=/var/run/iventoy.pid
 Environment=IVENTOY_AUTO_RUN=1
+Environment=IVENTOY_API_ALL=1
+Environment=LIBRARY_PATH=/root/lib/lin64
+Environment=LD_LIBRARY_PATH=/root/lib/lin64
 Restart=on-failure
+#Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 '
-    
-    pct exec "$CONTAINER_ID" -- systemctl daemon-reload
-    pct exec "$CONTAINER_ID" -- systemctl enable iventoy.service
-    pct exec "$CONTAINER_ID" -- systemctl start iventoy.service
-    
+    pct exec "$CONTAINER_ID" -- systemctl enable -q --now iventoy.service
     print_info "iVentoy service created and enabled."
 }
 
@@ -164,24 +170,22 @@ enable_console_autologin() {
     print_info "enable_console_autologin (root) on tty1 CONTAINER_ID: $CONTAINER_ID ..."
     pct exec "$CONTAINER_ID" -- bash -c "set -e
 mkdir -p /etc/systemd/system/container-getty@1.service.d
-cat > /etc/systemd/system/container-getty@1.service.d/override.conf <<'EOF'
-[Service]
-  ExecStart=
-  ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud tty%I 115200,38400,9600 $TERM
-EOF
+echo '[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud tty%I 115200,38400,9600 \$TERM' > /etc/systemd/system/container-getty@1.service.d/override.conf
 systemctl daemon-reload || true
 systemctl enable getty@tty1 || true
 systemctl restart getty@tty1 || true
-#systemctl status getty@tty1 || true"
+#systemctl status getty@tty1 || true
+cat /etc/systemd/system/container-getty@1.service.d/override.conf"
     print_info "Console auto-login enabled."
 }
 
 # Show summary
 show_summary() {
-    print_info "Container creation completed!"
     echo ""
     echo "========================================"
-    echo "Container Details:"
+    print_info "show_summary!"
     echo "========================================"
     echo "Container ID:    $CONTAINER_ID"
     echo "Name:            $CONTAINER_NAME"
@@ -220,11 +224,20 @@ main() {
     enable_console_autologin
     Installing_dependencies
     install_iventoy
+    echo pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
+    pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
+    #pct set "$CONTAINER_ID" -mp1 /sys/devices/virtual/dmi/id,mp=/root/data/sys/class/dmi/id,ro=1
+    #print_info "reBoot."
+    #pct reboot "$CONTAINER_ID"
     create_service
-    echo pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/opt/iVentoy/iso,ro=1
-    pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/opt/iVentoy/iso,ro=1
     show_summary
+    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/unattended.xml /root/user/scripts/example/unattended.xml
+    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/windows_injection.7z /root/user/scripts/example/windows_injection.7z
+    pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
+    echo pct exec "$CONTAINER_ID" -- /root/iventoy.sh -R start
+    pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
+    cat /root/log/log.txt
     echo "pct stop $CONTAINER_ID ; pct destroy $CONTAINER_ID"
+    pct exec "$CONTAINER_ID" -- ls -all /sys/class/dmi/id ; ls /sys/class/dmi/id ; cat /sys/class/dmi/id/product_uuid
 }
-
 main
