@@ -4,23 +4,30 @@ CONTAINER_ID=$(pvesh get /cluster/nextid)
 ## Default container name: use the script filename (without .sh). Allow override via $2
 # Use BASH_SOURCE for robustness when the script is sourced or executed
 SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
-# sanitize: lowercase and replace invalid chars with '-'; allow a-z0-9 and hyphen
-SANITIZED_NAME=$(echo "$SCRIPT_NAME" | sed 's/[^a-z0-9-]/-/g')
-CONTAINER_NAME=${2:-$SANITIZED_NAME}
-echo "Container Name: $CONTAINER_NAME"
-exit
+SCRIPT_NAME="${SCRIPT_NAME#pve_createContainer-}"
+SCRIPT_NAME=$(echo "$SCRIPT_NAME" | sed 's/[^A-Za-z0-9-]/-/g')
+CONTAINER_NAME=${2:-$SCRIPT_NAME}
+
 HOSTNAME="${CONTAINER_NAME}"
-VLAN_ID=0
-IP_ADDRESS="dhcp"
-MAC="bc:24:11:76:fc:38"
+IP_Config="dhcp"
+MAC=""                      # Optional MAC address (leave empty for random) - format: 02:xx:xx:xx:xx:xx (02 for locally administered)
 GATEWAY=""                     # Gateway IP (leave empty for DHCP)
 DISK_SIZE="2"                  # Disk size in GB
-MEMORY="512"                   # Memory in MB
+MEMORY="32"                    # MB
+SWAP="16"                    # MB
 CORES=1                        # CPU cores
 STORAGE="sdd1"                 # Storage backend
 OS_TYPE="debian"               # OS type
-OS_VERSION="13"                # Debian version
+OS_VERSION="13"                # OS version
+OS_VERSION="sdd1:vztmpl/$OS_TYPE-${OS_VERSION}-standard_${OS_VERSION}.1-2_amd64.tar.zst"
 APT_CACHER="192.168.50.78:3142" # apt-cacher-ng host[:port] (empty to disable). Example: 10.0.0.2:3142
+
+# Root password: can be provided via env `ROOT_PASSWORD` or prompted interactively
+ROOT_PASSWORD="${ROOT_PASSWORD:-}"
+if [ -z "$ROOT_PASSWORD" ] && [ -t 0 ]; then
+    read -s -p "Enter root password for the container: " ROOT_PASSWORD
+    echo
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,7 +53,7 @@ validate_input() {
         print_error "pct command not found. This script must be run on a Proxmox VE node."
         exit 1
     fi
-    
+
     if pct status "$CONTAINER_ID" &> /dev/null; then
         print_error "Container ID $CONTAINER_ID already exists."
         exit 1
@@ -55,23 +62,25 @@ validate_input() {
 
 create_container() {
     print_info "create_container $CONTAINER_ID..."
-    
+
     if [ -n "$MAC" ]; then
         MAC=",hwaddr=$MAC"
     fi
-    if [ "${IP_ADDRESS,,}" = "dhcp" ]; then
+    if [ "${IP_Config,,}" = "dhcp" ]; then
         NETCFG="name=eth0,bridge=vmbr0$MAC,ip=dhcp"
     else
-        NETCFG="name=eth0,bridge=vmbr0$MAC,ip=${IP_ADDRESS}/24,gw=${GATEWAY}"
+        NETCFG="name=eth0,bridge=vmbr0$MAC,ip=${IP_Config}/24,gw=${GATEWAY}"
     fi
+    echo $NETCFG;
     # Optional extra flags (uncomment or set EXTRA_FLAGS variable):
     EXTRA_FLAGS="--swap 512" #--start 1 --onboot 1
-    EXTRA_FLAGS="$EXTRA_FLAGS --unprivileged 0"
+    EXTRA_FLAGS="$EXTRA_FLAGS --unprivileged 1"
 
     pct create "$CONTAINER_ID" \
-        "sdd1:vztmpl/debian-${OS_VERSION}-standard_${OS_VERSION}.1-2_amd64.tar.zst" \
+        "$OS_VERSION" \
         --cores "$CORES" \
         --memory "$MEMORY" \
+        --swap "$SWAP" \
         --storage "$STORAGE" \
         --rootfs "${STORAGE}:${DISK_SIZE}" \
         --net0 "${NETCFG}" \
@@ -81,30 +90,16 @@ create_container() {
         --hostname "$HOSTNAME" \
         ${EXTRA_FLAGS:-}
 
-    #echo "lxc.mount.entry = /sys/class/dmi/id sys/class/dmi/id none ro,bind,create=dir >> /etc/pve/lxc/$CONTAINER_ID.conf"
-    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id sys/devices/virtual/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
-    #echo "lxc.mount.entry = /sys/devices/virtual/dmi/id /root/data/sys/class/dmi/id none ro,bind,create=dir" >> /etc/pve/lxc/${CONTAINER_ID}.conf
-
     print_info "Container $CONTAINER_ID created successfully."
-}
-
-Installing_dependencies() {    
-    print_info "Installing_dependencies..."
-    pct exec "$CONTAINER_ID" -- apt-get install -y \
-        curl \
-        wget \
-        git \
-        python3 \
-        python3-pip \
-        build-essential \
-        libfuse-dev \
-        zlib1g-dev \
-        unzip
 }
 
 configure_apt_cacher() {
     if [ -z "$APT_CACHER" ]; then
         print_info "configure_apt_cacher not set, skipping apt-cacher-ng configuration"
+        return
+    fi
+    if [ $OS_TYPE == "alpine" ] ; then
+        print_info "configure_apt_cacher not work yet with $OS_TYPE"
         return
     fi
 
@@ -118,34 +113,27 @@ configure_apt_cacher() {
     # Optionally configure https to go through apt-cacher-ng via apt-transport-https wrappers if needed
 }
 
-install_iventoy() {
-    print_info "install_iventoy ..."
-    
-    pct exec "$CONTAINER_ID" -- bash -c '
-        set -e
-        RELEASE=$(curl -s https://api.github.com/repos/ventoy/pxe/releases/latest | grep "tag_name" | awk "{print substr(\$2, 3, length(\$2)-4) }")
-        echo "version: $RELEASE"
-        mkdir -p /root/{data,iso}
-        cd /tmp
-        wget -q https://github.com/ventoy/PXE/releases/download/v${RELEASE}/iventoy-${RELEASE}-linux-free.tar.gz
-        tar -C /tmp -xzf iventoy*.tar.gz
-        rm -rf /tmp/iventoy*.tar.gz
-        mv /tmp/iventoy*/* /root/
-        cd /root
-        #python3 -m pip install -r requirements.txt
-        chmod +x ./iventoy.sh
-    '
-    
-    print_info "iVentoy installed in /root"
+Installing_dependencies() {
+    print_info "Installing_dependencies..."
+    pct exec "$CONTAINER_ID" -- cat /etc/ssh/sshd_config | grep PermitRootLogin
+    pct exec "$CONTAINER_ID" -- sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+    pct exec "$CONTAINER_ID" -- cat /etc/ssh/sshd_config | grep PermitRootLogin
+    pct exec "$CONTAINER_ID" -- systemctl restart sshd
+}
+
+install_app() {
+    print_info "install_app ..."
+    pct exec "$CONTAINER_ID" -- apt -y install corosync-qnetd
+    print_info "app installed"
 }
 
 create_service() {
     print_info "create_service..."
-    
-    pct exec "$CONTAINER_ID" -- bash -c 'cat <<EOF >/etc/systemd/system/iventoy.service
+
+    pct exec "$CONTAINER_ID" -- sh -c 'cat <<EOF > /etc/systemd/system/coroSync.service
 [Unit]
-Description=iVentoy PXE Boot Server
-Documentation=https://iventoy.com
+Description=coroSync Quorum Device
+Documentation=https://github.com/corosync/corosync
 After=network.target
 
 [Service]
@@ -153,13 +141,9 @@ After=network.target
 #Type=simple
 Type=forking
 WorkingDirectory=/root
-ExecStart=/root/iventoy.sh -R start
-ExecStop=/root/iventoy.sh stop
-PIDFile=/var/run/iventoy.pid
-Environment=IVENTOY_AUTO_RUN=1
-Environment=IVENTOY_API_ALL=1
-Environment=LIBRARY_PATH=/root/lib/lin64
-Environment=LD_LIBRARY_PATH=/root/lib/lin64
+ExecStart=/root/coroSync.sh -R start
+ExecStop=/root/coroSync.sh stop
+PIDFile=/var/run/coroSync.pid
 Restart=on-failure
 #Restart=always
 RestartSec=10
@@ -168,8 +152,8 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 '
-    pct exec "$CONTAINER_ID" -- systemctl enable -q --now iventoy.service
-    print_info "iVentoy service created and enabled."
+    pct exec "$CONTAINER_ID" -- systemctl enable -q --now coroSync.service
+    print_info "service created and enabled."
 }
 
 # Enable root auto-login on the container console (tty1)
@@ -197,54 +181,71 @@ show_summary() {
     echo "Container ID:    $CONTAINER_ID"
     echo "Name:            $CONTAINER_NAME"
     echo "Hostname:        $HOSTNAME"
-    echo "IP Address:      $IP_ADDRESS"
+    echo "IP Address:      $IP_Config"
     echo "Memory:          ${MEMORY}MB"
+    echo "Swap:            ${SWAP}MB"
     echo "Disk:            ${DISK_SIZE}GB"
     echo "========================================"
     echo ""
-    if [ "${IP_ADDRESS,,}" = "dhcp" ]; then
-        IP_ADDRESS=$(pct exec "$CONTAINER_ID" -- hostname -I | awk '{print $1}')
-    fi
-    print_info "Access iVentoy at: http://${IP_ADDRESS}:26000"
-    echo ""
 }
 
-starting() {
-    print_info "starting $CONTAINER_ID..."
-    pct start "$CONTAINER_ID"
-    configure_apt_cacher
+send_start(){
+    print_info "send_start $CONTAINER_ID..."
+    time pct start "$CONTAINER_ID"
+    print_info "sended."
+}
+
+Updating() {
     print_info "Updating system packages..."
     pct exec "$CONTAINER_ID" -- apt -y update
     print_info "upgrading system packages..."
     pct exec "$CONTAINER_ID" -- apt -y upgrade
+    print_info "upgraded $CONTAINER_ID..."
 }
 
 main() {
-    print_info "PVE iVentoy LXC Container Creation Script"
+    print_info "PVE LXC Container Creation Script"
     echo v0.0.1
-    echo Creates a lightweight iVentoy container for ISO/image management on Proxmox VE
     echo ""
-    
+
     validate_input
     create_container
-    starting
+    send_start
+    if [ "${IP_Config,,}" = "dhcp" ]; then
+        while true; do
+            IP_ADDRESS=$(lxc-info -n "$CONTAINER_ID" -i | awk '{print $2}')
+            if [ -z "$IP_ADDRESS" ]; then
+                echo "empty IP_ADDRESS, waiting 1s to try ..."
+                sleep 1
+            else 
+                echo "Got IP: $IP_ADDRESS"
+                break 
+            fi
+        done
+    else
+        IP_ADDRESS="$IP_Config"
+    fi
+    while ! pct exec "$CONTAINER_ID" -- ping -c 2 "8.8.8.8"; do
+        print_warn "ping 8.8.8.8 bad, witing 1s to try ..."
+        sleep 1
+    done
+    # If a root password was provided/prompted, set it inside the container
+    if [ -n "$ROOT_PASSWORD" ]; then
+        print_info "Setting root password inside container..."
+        pct exec "$CONTAINER_ID" -- bash -c "echo 'root:${ROOT_PASSWORD}' | chpasswd" || print_warn "Failed to set root password"
+    fi
+    Updating
     enable_console_autologin
     Installing_dependencies
-    install_iventoy
-    echo pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
-    pct set "$CONTAINER_ID" -mp0 /mnt/pve/sdd1/template/iso,mp=/root/iso,ro=1
-    #pct set "$CONTAINER_ID" -mp1 /sys/devices/virtual/dmi/id,mp=/root/data/sys/class/dmi/id,ro=1
-    #print_info "reBoot."
-    #pct reboot "$CONTAINER_ID"
-    create_service
+    install_app
+    print_info "reBoot" ; pct reboot "$CONTAINER_ID"
+    #create_service
     show_summary
-    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/unattended.xml /root/user/scripts/example/unattended.xml
-    pct push "$CONTAINER_ID" pve_createContainer-iVentoy/windows_injection.7z /root/user/scripts/example/windows_injection.7z
-    pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
-    echo pct exec "$CONTAINER_ID" -- /root/iventoy.sh -R start
-    pct exec "$CONTAINER_ID" -- /root/iventoy.sh status
-    cat /root/log/log.txt
-    echo "pct stop $CONTAINER_ID ; pct destroy $CONTAINER_ID"
-    pct exec "$CONTAINER_ID" -- ls -all /sys/class/dmi/id ; ls /sys/class/dmi/id ; cat /sys/class/dmi/id/product_uuid
+    print_info "executing: apt -y install corosync-qdevice"
+    apt -y install corosync-qdevice
+    print_info "executing: pvecm qdevice setup $IP_ADDRESS -f"
+    pvecm qdevice setup "$IP_ADDRESS"
+    print_info "apt -y remove corosync-qdevice"
+    print_info "pvecm qdevice remove"
 }
 main
